@@ -1,0 +1,577 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.modules.dns.mapper.DnsDohDao">
+
+    <resultMap id="dohMap" type="com.example.modules.dns.domain.Result">
+        <id property="id" column="id"/>
+        <id property="ip" column="ip"/>
+        <id property="host" column="host"/>
+        <id property="port" column="port"/>
+        <result property="path" column="path"/>
+        <result property="method" column="method"/>
+        <result property="connectType" column="connect_type"/>
+        <result property="statusCode" column="status_code"/>
+        <result property="repHeader" column="rep_header"/>
+        <result property="repBody" column="rep_body"/>
+        <result property="timestamp" column="timestamp"/>
+        <result property="component" column="component"/>
+        <result property="rounds" column="rounds"/>
+        <association property="ipInformation" columnPrefix="ii_"
+                     javaType="com.example.modules.dns.domain.IpInformation">
+            <result property="id" column="id"/>
+            <result property="ip" column="ip"/>
+            <result property="country" column="country"/>
+            <result property="province" column="province"/>
+            <result property="city" column="city"/>
+            <result property="district" column="district"/>
+            <result property="provider" column="provider"/>
+            <result property="isp" column="isp"/>
+            <result property="asnumber" column="asnumber"/>
+            <result property="timestamp" column="timestamp"/>
+            <result property="zipcode" column="zipcode"/>
+            <result property="timezone" column="timezone"/>
+        </association>
+
+        <collection property="pathList" columnPrefix="da2_" ofType="String">
+            <result property="pathList" column="path"/>
+        </collection>
+
+        <collection property="componentList" columnPrefix="da2_" ofType="String">
+            <result property="component" column="component"/>
+        </collection>
+        <collection property="ipCert" columnPrefix="ic_" ofType="com.example.modules.dns.domain.IpCert">
+            <id property="id" column="id"/>
+            <result property="ip" column="ip"/>
+            <result property="port" column="port"/>
+            <result property="certificate" column="certificate"/>
+            <result property="ca" column="ca"/>
+            <result property="timestamp" column="timestamp"/>
+        </collection>
+
+        <collection property="vulnerability" columnPrefix="v_" ofType="com.example.modules.dns.domain.Vulnerability">
+            <id property="id" column="id"/>
+            <result property="component" column="component"/>
+            <result property="vulnerability" column="vulnerability"/>
+            <result property="timestamp" column="timestamp"/>
+        </collection>
+
+    </resultMap>
+
+    <select id="queryDohPage" resultMap="dohMap">
+        SELECT da.id,da.ip,da.`host`,da.`port`,da.rounds,da.`timestamp`
+        ,GROUP_CONCAT(concat(da.method,'',da.path)) path
+        ,GROUP_CONCAT(distinct da.component) component
+        ,ii.country ii_country,ii.provider ii_provider,ii.city ii_city ,ii.asnumber ii_asnumber,ii.isp ii_isp,
+        ii.province ii_province,ii.zipcode ii_zipcode,ii.district ii_district,
+        v.`vulnerability` v_vulnerability
+        FROM (SELECT da.* FROM doh_attribute da
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                da.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                AND da.`port` = #{params.port}
+            </if>
+        </where>
+        ) da
+        LEFT JOIN ip_information ii ON da.ip=ii.ip
+        LEFT JOIN `vulnerability` v ON v.`component` = da.`component`
+
+        GROUP BY da.ip,da.port,da.host,da.rounds
+        order by da.`timestamp` desc
+        LIMIT #{params.n},#{params.m}
+    </select>
+
+    <select id="dohProvinceCount" resultType="map">
+        SELECT
+        COUNT(distinct da.ip) count,ii.`province`
+        FROM (SELECT DISTINCT ip from doh_attribute
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and port = #{params.port}
+            </if>
+        </where>
+        ) da
+        JOIN `ip_information` ii
+        ON da.ip = ii.ip AND ii.province IS NOT NULL AND ii.province !=''
+        GROUP BY ii.province
+    </select>
+
+    <select id="dohChinaMapCount" resultType="map">
+        SELECT ii.`province`,
+               COUNT(distinct da.ip) count
+        FROM `doh_attribute` da
+                 JOIN `ip_information` ii
+                      ON da.ip = ii.ip
+        where ii.country = '中国'
+          and da.`rounds` = (select MAX(rounds) FROM doh_attribute)
+          and ii.province IS NOT NULL
+          AND ii.province != ''
+        GROUP BY ii.province
+
+        order by count desc
+    </select>
+
+    <select id="dohCountryCount" resultType="map">
+        SELECT ii.`country`,
+               COUNT(distinct da.ip) count
+        FROM `doh_attribute` da
+                 JOIN `ip_information` ii
+                      ON da.ip = ii.ip
+        where da.`rounds` = (SELECT DISTINCT MAX(rounds) FROM doh_attribute)
+        GROUP BY ii.country
+        order by count desc
+    </select>
+
+    <select id="dohAndDo53ProvinceCount" resultType="map">
+        SELECT province,SUM(count) count FROM (
+        SELECT
+        ii.`province`,COUNT(distinct da.ip) count,da.ip
+        FROM `doh_attribute` da
+        JOIN `ip_information` ii
+        ON da.ip = ii.ip
+        where ii.province IS NOT NULL AND ii.province !=''
+        <if test="params.ip != null and params.ip != ''">
+            and da.ip = #{params.ip}
+        </if>
+        GROUP BY ii.province
+
+        UNION ALL
+
+        SELECT
+        ii.`province`,COUNT(distinct s.ip) COUNT, s.ip
+        FROM `scan_result` s
+        JOIN `ip_information` ii
+        ON s.ip = ii.ip
+        where ii.province IS NOT NULL AND ii.province !=''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        GROUP BY ii.province
+        ) a1
+
+        GROUP BY a1.province
+    </select>
+
+    <select id="dohProviderCount" resultType="map">
+        SELECT
+        COUNT(ip_attr.ip) count,ii.`provider`
+        from
+        (SELECT DISTINCT ip from doh_attribute
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and port = #{params.port}
+            </if>
+        </where>
+        ) ip_attr
+        JOIN `ip_information` ii on ip_attr.ip = ii.ip AND ii.provider IS NOT NULL AND ii.provider !=''
+
+        GROUP BY ii.provider
+    </select>
+
+    <select id="dohAndDo53ProviderCount" resultType="map">
+
+        SELECT provider,SUM(COUNT) count FROM(
+        SELECT
+        ii.`provider`,COUNT(da.ip) COUNT,da.ip
+        FROM (SELECT id, ip from doh_attribute
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                ip = #{params.ip}
+            </if>
+        </where>
+        ) da
+        JOIN `ip_information` ii ON da.ip = ii.ip
+        GROUP BY ii.provider
+
+        UNION ALL
+        SELECT
+        ii.`provider`,COUNT(distinct s.ip) COUNT,s.ip
+        FROM `scan_result` s
+        JOIN `ip_information` ii ON s.ip = ii.ip
+        GROUP BY ii.provider
+        ) a1
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                a1.ip = #{params.ip}
+            </if>
+        </where>
+        GROUP BY a1.provider
+        HAVING provider IS NOT NULL AND provider !=''
+    </select>
+
+    <select id="dohComponentCount" resultType="map">
+        SELECT
+        da.component,COUNT(distinct da.ip) count
+        FROM (SELECT DISTINCT ip,component from doh_attribute
+        where
+        component IS NOT NULL AND component !=''
+        <if test="params.ip != null and params.ip != ''">
+            and ip = #{params.ip}
+        </if>
+        <if test="params.port != null and params.port != ''">
+            and port = #{params.port}
+        </if>
+        ) da
+        GROUP BY da.component
+
+    </select>
+
+    <select id="dohAndDo53ComponentCount" resultType="map">
+        SELECT component,SUM(COUNT) count FROM (
+        SELECT
+        da.component,COUNT(distinct da.ip) COUNT,da.ip
+        FROM `doh_attribute` da
+        <where>
+
+        <if test="params.ip != null and params.ip != ''">
+             da.ip = #{params.ip}
+        </if>
+
+        </where>
+        GROUP BY da.component,da.ip
+
+        UNION ALL
+
+        SELECT
+        s.component,COUNT(distinct s.ip) COUNT ,s.ip
+        FROM `scan_result` s
+        GROUP BY s.component,s.ip) a1
+        where component IS NOT NULL AND component !=''
+        <if test="params.ip != null and params.ip != ''">
+            and a1.ip = #{params.ip}
+        </if>
+
+        GROUP BY a1.component
+
+    </select>
+
+    <select id="dohServiceCategoryCount" resultType="map">
+        <!--SELECT IFNULL(SUM(count),0) count FROM (
+        SELECT da.ip,COUNT(distinct da.ip) count FROM `doh_attribute` da
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                and da.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and da.port = #{params.port}
+            </if>
+        </where>
+        GROUP BY ip) a1-->
+        SELECT count(1) count from (
+        SELECT distinct da.ip from `doh_attribute` da
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                da.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and da.port = #{params.port}
+            </if>
+        </where>
+        ) a
+
+    </select>
+
+    <select id="dohResultTotalCount" resultType="int">
+        SELECT COUNT(1) count FROM (
+        SELECT ip,PORT,HOST,rounds
+        FROM `doh_attribute` da
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                da.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and da.port = #{params.port}
+            </if>
+        </where>
+        GROUP BY ip,PORT,HOST,rounds
+        ) a1
+    </select>
+
+    <select id="dohVulnerabilityCount" resultType="map">
+        SELECT vulnerability,COUNT(distinct ip) count FROM (
+        SELECT da.ip,da.port,da.host,da.`component`
+        ,v.`vulnerability`
+        FROM `doh_attribute` da
+        JOIN `vulnerability` v ON v.`component` = da.`component` AND vulnerability IS NOT NULL AND vulnerability != ''
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                da.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and da.port = #{params.port}
+            </if>
+        </where>
+        ) a1
+
+        GROUP BY a1.vulnerability
+    </select>
+
+    <select id="dohAndDo53VulnerabilityCount" resultType="map">
+        SELECT vulnerability,COUNT(distinct ip) count FROM (
+        SELECT da.ip
+        ,v.`vulnerability`
+        FROM `doh_attribute` da
+        JOIN `vulnerability` v ON v.`component` = da.`component`
+        where vulnerability IS NOT NULL AND vulnerability !=''
+        <if test="params.ip != null and params.ip != ''">
+            and ip = #{params.ip}
+        </if>
+
+        UNION ALL
+
+        SELECT s.ip
+        ,v.`vulnerability`
+        FROM `scan_result` s
+        JOIN `vulnerability` v ON v.`component` = s.`component`
+        where vulnerability IS NOT NULL AND vulnerability !=''
+        <if test="params.ip != null and params.ip != ''">
+            and ip = #{params.ip}
+        </if>
+        ) a1
+
+        GROUP BY a1.vulnerability
+    </select>
+
+
+    <select id="dohPortCount" resultType="map">
+        SELECT COUNT(ip) count,`port` FROM
+        (SELECT DISTINCT ip,port from doh_attribute
+        where `port` is not null AND `port` != ''
+        <if test="params.ip != null and params.ip != ''">
+            and ip = #{params.ip}
+        </if>
+        <if test="params.port != null and params.port != ''">
+            and port = #{params.port}
+        </if>
+        ) da
+        GROUP BY port
+    </select>
+
+
+    <select id="dohIpCount" resultType="int">
+        SELECT COUNT(distinct da.ip) FROM doh_attribute da
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                da.ip = #{params.ip}
+            </if>
+        </where>
+    </select>
+    <select id="getDohRepBody" resultMap="dohMap">
+        select da.rep_body, da.rep_header
+        from doh_attribute da
+        where da.ip = #{ip}
+          AND da.port = #{port}
+          AND da.host = #{host}
+          AND da.rounds = #{rounds}
+    </select>
+
+    <select id="selectDohInfoByUnion" resultMap="dohMap">
+        SELECT da.*,
+        GROUP_CONCAT(concat(da.method, '', da.path)) path,
+        ii.country ii_country,
+        ii.provider ii_provider,
+        ii.city ii_city,
+        ii.asnumber ii_asnumber,
+        ii.isp ii_isp,
+        ii.province ii_province,
+        ii.zipcode ii_zipcode,
+        ii.district ii_district,
+        v.`vulnerability` v_vulnerability
+        from (select da.ip
+            from (select count(1), d.ip from doh_attribute d
+            <where>
+                <if test="params.ip != null and params.ip != ''">
+                    d.ip = #{params.ip}
+                </if>
+                <if test="params.port != null and params.port != ''">
+                    and d.`port` = #{params.port}
+                </if>
+            </where>
+            group by d.ip) da
+            JOIN scan_result s on da.ip = s.ip) dip
+        join doh_attribute da on da.ip = dip.ip
+        left join ip_information ii on ii.ip = dip.ip
+        left join vulnerability v on v.component = da.component
+
+        group by da.ip, da.host, da.`port`, da.rounds
+        order by da.`timestamp` desc
+        LIMIT #{params.offset},#{params.limit}
+    </select>
+
+    <select id="selectDohCountByUnion" resultType="integer">
+        select count(1)
+        from (SELECT da.id, da.ip, da.host, da.`port`, da.rounds
+        from (select da.ip
+        from (select count(1), d.ip from doh_attribute d
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                d.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and d.`port` = #{params.port}
+            </if>
+        </where>
+        group by d.ip) da
+        JOIN scan_result s on da.ip = s.ip
+        ) dip
+        join doh_attribute da on da.ip = dip.ip
+        group by da.ip, da.host, da.`port`, da.rounds) total
+
+    </select>
+
+    <select id="countDohPortUnion" resultType="java.util.Map">
+
+        select count(distinct dh.ip) count ,dh.`port`
+        from (select distinct ip,`port` from doh_attribute
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and port = #{params.port}
+            </if>
+        </where>
+        ) dh
+        join scan_result sc on sc.ip = dh.ip
+        group by dh.`port`
+        having dh.`port` is not null AND dh.`port` != ''
+
+        UNION ALL
+
+        select count(distinct sc.ip) count,'53' as `port`
+        from (select distinct ip,`port` from doh_attribute da
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                da.ip = #{params.ip}
+            </if>
+        </where>
+        ) dh
+        join scan_result sc on sc.ip = dh.ip
+
+    </select>
+
+    <select id="getDohAndDo53ProvinceCount" resultType="java.util.Map">
+        SELECT
+        ii.`province`,COUNT(distinct s.ip) COUNT
+        FROM ( select sc.id,sc.ip from `scan_result` sc
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                sc.ip = #{ip}
+            </if>
+        </where>
+        )s
+        join `doh_attribute` da on da.ip = s.ip
+        JOIN `ip_information` ii
+        ON s.ip = ii.ip
+        <where>
+            <if test="params.port != null and params.port != ''">
+                da.`port` = #{params.port}
+            </if>
+        </where>
+        GROUP BY ii.province
+        having ii.province IS NOT NULL AND ii.province !=''
+    </select>
+
+    <select id="getDohAndDo53ProviderCount" resultType="java.util.Map">
+        SELECT
+        ii.`provider`,COUNT(distinct s.ip) COUNT
+        FROM ( select sc.id,sc.ip from `scan_result` sc
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                sc.ip = #{ip}
+            </if>
+        </where>
+        )s
+        join `doh_attribute` da on da.ip = s.ip
+        JOIN `ip_information` ii
+        ON s.ip = ii.ip
+        <where>
+            <if test="params.port != null and params.port != ''">
+                da.`port` = #{params.port}
+            </if>
+        </where>
+        GROUP BY ii.provider
+        having ii.provider IS NOT NULL AND ii.provider !=''
+    </select>
+
+    <select id="getDohAndDo53ComponentCount" resultType="java.util.Map">
+        SELECT
+        da.component component,count(distinct da.ip) count
+        FROM ( select count(1),d.ip,d.component from doh_attribute d
+        where d.component IS NOT NULL AND d.component !=''
+        <if test="params.ip != null and params.ip != ''">
+           AND d.ip = #{ip}
+        </if>
+        ) da
+        JOIN scan_result s on da.ip = s.ip
+        <where>
+            <if test="params.port != null and params.port != ''">
+                da.`port` = #{params.port}
+            </if>
+        </where>
+        GROUP BY da.component
+        having da.component IS NOT NULL AND da.component !=''
+    </select>
+
+    <select id="getDohServiceCategoryCount" resultType="java.util.Map">
+        SELECT count(DISTINCT da.ip)
+        from (select count(1),d.ip from doh_attribute d
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                d.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and d.`port` = #{params.port}
+            </if>
+        </where>
+        group by d.ip) da
+        join scan_result sc on da.ip = sc.ip
+    </select>
+    <select id="getDohAndDo53VulnerabilityCount" resultType="java.util.Map">
+        SELECT vulnerability, COUNT(distinct ip) count
+        FROM (
+        select da.ip, dv.vulnerability
+        from (select count(1), d.ip, d.component
+        from doh_attribute d
+        where d.component is not null and d.component != ''
+        <if test="params.ip != null and params.ip != ''">
+            and d.ip = #{params.ip}
+        </if>
+        <if test="params.port != null and params.port != ''">
+            and d.`port` = #{params.port}
+        </if>
+        group by d.ip, d.component) da
+        join scan_result sc on da.ip = sc.ip
+        join (select distinct v.vulnerability, d.component, d.ip from doh_attribute d
+        JOIN `vulnerability` v ON v.`component` = d.`component`) dv
+        on da.ip = dv.ip
+        where dv.vulnerability is not null and dv.vulnerability != ''
+
+        union all
+
+        select s.ip, dv.vulnerability
+        from (select count(1), d.ip from doh_attribute d
+        group by d.ip
+        ) da
+        join scan_result s on da.ip = s.ip
+        join (select distinct v.vulnerability, sc.component, sc.ip
+        from scan_result sc
+        JOIN `vulnerability` v ON v.`component` = sc.`component`) dv
+        on s.ip = dv.ip
+        where dv.vulnerability is not null and dv.vulnerability != ''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        ) a1
+        GROUP BY a1.vulnerability
+    </select>
+
+</mapper>

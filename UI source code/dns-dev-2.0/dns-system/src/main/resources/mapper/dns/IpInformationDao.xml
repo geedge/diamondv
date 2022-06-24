@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.modules.dns.mapper.IpInformationDao">
+
+    <resultMap id="ipMap" type="com.example.modules.dns.domain.IpInformation">
+        <id property="id" column="id"/>
+        <id property="ip" column="ip"/>
+        <result property="country" column="country"/>
+        <result property="province" column="province"/>
+        <result property="city" column="city"/>
+        <result property="district" column="district"/>
+        <result property="provider" column="provider"/>
+        <result property="isp" column="isp"/>
+        <result property="asnumber" column="asnumber"/>
+        <result property="timestamp" column="timestamp"/>
+        <result property="zipcode" column="zipcode"/>
+        <result property="timezone" column="timezone"/>
+
+        <association property="dnsType" columnPrefix="dt_" javaType="com.example.modules.dns.domain.DnsType">
+            <id property="id" column="id"/>
+            <id property="ip" column="ip"/>
+            <result property="type" column="type"/>
+        </association>
+
+        <collection property="ipCert" columnPrefix="ic_" ofType="com.example.modules.dns.domain.IpCert">
+            <id property="id" column="id"/>
+            <id property="ip" column="ip"/>
+            <result property="port" column="port"/>
+            <result property="certificate" column="certificate"/>
+            <result property="ca" column="ca"/>
+            <result property="timestamp" column="timestamp"/>
+        </collection>
+
+        <collection property="dohAttribute" columnPrefix="da_" ofType="com.example.modules.dns.domain.DohAttribute">
+            <id property="ip" column="ip"/>
+            <result property="host" column="host"/>
+            <result property="port" column="port"/>
+            <result property="path" column="path"/>
+            <result property="method" column="method"/>
+            <result property="connectType" column="connect_type"/>
+            <result property="statusCode" column="status_code"/>
+            <result property="repHeader" column="rep_header"/>
+            <result property="repBody" column="rep_body"/>
+            <result property="timestamp" column="timestamp"/>
+            <result property="component" column="component"/>
+        </collection>
+
+    </resultMap>
+
+
+
+    <select id="queryIpPage" resultMap="ipMap">
+        SELECT ii.*
+--         ,ic.certificate ic_certificate ,ic.ca ic_ca
+        ,da.host da_host , da.rep_body da_rep_body , da.status_code da_status_code ,da.component da_component,da.path da_path
+        FROM `ip_information`  ii
+--         LEFT JOIN `ip_cert` ic ON ii.ip = ic.ip
+        left join doh_attribute da on ii.ip = da.ip
+
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                and ii.ip = #{params.ip}
+            </if>
+        </where>
+
+    </select>
+    <select id="getIpInfoByFwd" resultType="ipInformation">
+        select ii.* from ip_information ii
+        join (SELECT fd.upstream from forward_dns fd where fd.forwarder = #{ip}
+            <if test="epoch != '' and epoch != null ">
+                and fd.epoch = #{epoch}
+            </if>
+            ) fw
+            on fw.upstream = ii.ip
+    </select>
+
+</mapper>

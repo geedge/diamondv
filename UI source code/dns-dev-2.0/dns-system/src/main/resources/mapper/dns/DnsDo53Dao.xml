@@ -1,0 +1,400 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.modules.dns.mapper.DnsDo53Dao">
+
+    <resultMap id="do53Map" type="com.example.modules.dns.domain.Result">
+        <id property="id" column="id"/>
+        <result property="ip" column="ip"/>
+        <result property="flags" column="flags"/>
+        <result property="opcode" column="opcode"/>
+        <result property="qr" column="qr"/>
+        <result property="aa" column="aa"/>
+        <result property="ra" column="ra"/>
+        <result property="rcode" column="rcode"/>
+        <result property="queryName" column="queryName"/>
+        <result property="queryResponse" column="query_response"/>
+        <result property="component" column="component"/>
+        <result property="scanType" column="scanType"/>
+        <result property="timestamp" column="time"/>
+        <result property="dnsType" column="dnsType"/>
+        <result property="epoch" column="epoch"/>
+
+        <association property="ipInformation" columnPrefix="ii_"
+                     javaType="com.example.modules.dns.domain.IpInformation">
+            <result property="id" column="id"/>
+            <result property="ip" column="ip"/>
+            <result property="country" column="country"/>
+            <result property="province" column="province"/>
+            <result property="city" column="city"/>
+            <result property="district" column="district"/>
+            <result property="provider" column="provider"/>
+            <result property="isp" column="isp"/>
+            <result property="asnumber" column="asnumber"/>
+            <result property="timestamp" column="timestamp"/>
+            <result property="zipcode" column="zipcode"/>
+            <result property="timezone" column="timezone"/>
+        </association>
+        <collection property="componentList" ofType="String">
+            <result property="component" column="component"/>
+        </collection>
+
+        <collection property="vulnerability" columnPrefix="v_" ofType="com.example.modules.dns.domain.Vulnerability">
+            <id property="id" column="id"/>
+            <result property="component" column="component"/>
+            <result property="vulnerability" column="vulnerability"/>
+            <result property="timestamp" column="timestamp"/>
+        </collection>
+
+
+    </resultMap>
+
+    <select id="queryDo53Page" resultMap="do53Map">
+    SELECT s.*,
+        ii.country ii_country,ii.provider ii_provider,
+        ii.city ii_city ,ii.asnumber ii_asnumber,ii.isp ii_isp,
+        ii.province ii_province,ii.zipcode ii_zipcode,ii.district ii_district,
+        dt.type dnsType,v.`vulnerability` v_vulnerability
+        FROM (select s.* from scan_result s
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                s.ip = #{params.ip}
+            </if>
+        </where>
+        order by s.time desc
+        LIMIT #{params.n},#{params.m}
+        ) s
+        LEFT JOIN ip_information ii ON ii.ip = s.ip
+        LEFT JOIN dns_type dt ON dt.ip = s.ip AND dt.`epoch` = s.`epoch`
+        LEFT JOIN `vulnerability` v ON v.`component` = s.`component`
+
+
+    </select>
+
+    <select id="do53IpCount" resultType="int">
+        SELECT COUNT(distinct ip) FROM `scan_result`
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                ip = #{params.ip}
+            </if>
+        </where>
+
+    </select>
+
+    <select id="do53ServiceCategoryCount" resultType="map">
+        SELECT TYPE,COUNT(distinct ip) count FROM (
+        SELECT s.ip,dt.type FROM `scan_result` s
+        JOIN `dns_type` dt ON s.ip=dt.ip
+        where type IS NOT NULL AND type !=''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        <if test="params.dnsType != null and params.dnsType != ''">
+            and dt.type = #{params.dnsType}
+        </if>
+        ) a1
+        GROUP BY a1.type
+    </select>
+
+    <select id="do53ProvinceCount" resultType="map">
+        SELECT
+        ii.`province`,COUNT(distinct s.ip) count
+        FROM `scan_result` s
+        JOIN `ip_information` ii
+        ON s.ip = ii.ip AND ii.province IS NOT NULL AND ii.province !=''
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                and s.ip = #{params.ip}
+            </if>
+        </where>
+        GROUP BY ii.province
+    </select>
+
+    <select id="do53CountryCount" resultType="map">
+        SELECT ii.`country`,
+               COUNT(s.ip) count
+        FROM `scan_result` s
+                 JOIN `ip_information` ii
+                      ON s.ip = ii.ip
+        GROUP BY ii.country
+    </select>
+
+    <select id="do53CountryMapCount" resultType="map">
+        SELECT ii.`country`,
+               COUNT(ii.`country`) count,
+               dt.type
+        FROM `dns_type` dt
+                 JOIN `ip_information` ii ON dt.ip = ii.ip
+        WHERE dt.epoch = (SELECT MAX(epoch) FROM `dns_type`)
+        GROUP BY ii.`country`, dt.`type`
+        order by count desc
+    </select>
+
+    <select id="do53WorldMapCount" resultType="map">
+        SELECT ii.`country`,
+               COUNT(ii.`country`) count
+        FROM `dns_type` dt
+                 JOIN `ip_information` ii ON dt.ip = ii.ip
+        WHERE dt.epoch = (SELECT MAX(epoch) FROM `dns_type`)
+        GROUP BY ii.`country`
+        order by count desc
+    </select>
+
+    <select id="do53ChinaMapCount" resultType="map">
+        SELECT ii.`province`,
+               COUNT(ii.`province`) count
+        FROM `dns_type` dt
+                 JOIN `ip_information` ii ON dt.ip = ii.ip
+        WHERE ii.country = '中国'
+          and dt.epoch = (SELECT MAX(epoch) FROM `dns_type`)
+        GROUP BY ii.`province`
+        order by count desc
+    </select>
+
+    <select id="do53ProviderCount" resultType="map">
+        SELECT
+        ii.`provider`,COUNT(s.ip) count
+        FROM `scan_result` s
+        JOIN `ip_information` ii
+        ON s.ip = ii.ip AND provider IS NOT NULL AND provider !=''
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                s.ip = #{params.ip}
+            </if>
+        </where>
+        GROUP BY ii.provider
+    </select>
+
+
+    <select id="do53ComponentCount" resultType="map">
+        SELECT
+        s.component,COUNT(distinct s.ip) count
+        FROM `scan_result` s
+        where
+        component IS NOT NULL AND component !=''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        GROUP BY s.component
+    </select>
+
+    <select id="do53VulnerabilityCount" resultType="map">
+
+        SELECT vulnerability,COUNT(ip) count FROM (
+        SELECT s.ip
+        ,v.`vulnerability`
+        FROM `scan_result` s
+        JOIN `vulnerability` v ON v.`component` = s.`component`
+        where vulnerability IS NOT NULL AND vulnerability !=''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        ) a1
+        GROUP BY a1.vulnerability
+    </select>
+
+    <select id="pageCount" resultType="java.lang.Integer">
+        select count(1) from scan_result s
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                s.ip = #{params.ip}
+            </if>
+        </where>
+    </select>
+
+    <select id="queryOpenRdns" resultType="result">
+        select sc.*,
+        dt.type dnsType,
+        ii.country ii_country,ii.provider ii_provider,ii.city ii_city ,ii.asnumber ii_asnumber,ii.isp ii_isp,
+        ii.province ii_province,ii.zipcode ii_zipcode,ii.district ii_district,
+        v.`vulnerability` v_vulnerability
+        from
+        (
+        select sc.* from
+        scan_result sc join (select ip,epoch from dns_type where type = 1) dt on dt.ip = sc.ip and dt.epoch = sc.epoch
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                sc.ip = #{params.ip}
+            </if>
+        </where>
+        order by sc.epoch desc,sc.`time` desc LIMIT #{params.offset},#{params.limit}
+        ) sc
+
+        left join ip_information ii on sc.ip = ii.ip
+        left join vulnerability v on sc.component = v.component
+    </select>
+
+    <select id="getCountByDnsType" resultType="java.lang.Integer">
+        select count(1) from
+        (select id,ip,epoch from scan_result sr
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                sr.ip = #{params.ip}
+            </if>
+        </where>
+        ) sc
+        join ( select d.id,d.ip,d.epoch from dns_type d where d.type = #{dnsType}) dt
+        on dt.ip = sc.ip AND dt.epoch = sc.epoch
+
+
+    </select>
+
+    <select id="getIndependentIpNum" resultType="java.lang.Integer">
+        select count(distinct sc.ip)
+        from ( select id,ip,epoch from scan_result sr
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                ip = #{params.ip}
+            </if>
+        </where>
+        ) sc
+        join (select ip, epoch from dns_type d where d.type = #{dnsType})
+        dt on dt.ip = sc.ip and dt.epoch = sc.epoch
+
+    </select>
+
+    <select id="selectScanResultCountByUnion" resultType="java.lang.Integer">
+        select count(1) count
+        from (
+              select da.ip
+                 from (select count(1), d.ip from doh_attribute d
+                <where>
+                    <if test="params.ip != null and params.ip != ''">
+                        d.ip = #{params.ip}
+                    </if>
+                    <if test="params.port != null and params.port != ''">
+                        and d.`port` = #{params.port}
+                    </if>
+                </where>
+              group by d.ip) da
+              JOIN scan_result s on da.ip = s.ip
+             ) dip
+       join scan_result sc on sc.ip = dip.ip
+    </select>
+
+    <select id="selectScanResultByUnion" resultMap="do53Map">
+    SELECT sc.*,
+        ii.country ii_country, ii.provider ii_provider,
+        ii.city ii_city, ii.asnumber ii_asnumber, ii.isp ii_isp,
+        ii.province ii_province,ii.zipcode ii_zipcode,
+        ii.district ii_district,
+        dt.type dnsType, v.`vulnerability` v_vulnerability
+        from (
+        select da.ip
+            from (select count(1), d.ip from doh_attribute d
+            <where>
+                <if test="params.ip != null and params.ip != ''">
+                    d.ip = #{params.ip}
+                </if>
+                <if test="params.port != null and params.port != ''">
+                    and d.`port` = #{params.port}
+                </if>
+            </where>
+            group by d.ip) da
+            JOIN scan_result s on da.ip = s.ip
+        ) dip
+
+        join scan_result sc on sc.ip = dip.ip
+        left join ip_information ii on ii.ip = dip.ip
+        left join vulnerability v on v.component = sc.component
+        left join dns_type dt ON dt.ip = sc.ip AND dt.`epoch` = sc.`epoch`
+        order by sc.`time` desc
+        LIMIT #{params.offset},#{params.limit}
+    </select>
+
+    <select id="getDohAndDo53SrvCategoryCount" resultType="java.util.Map">
+        SELECT dt.type, COUNT(distinct da.ip) count
+        FROM (select count(1),d.ip from doh_attribute d
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                d.ip = #{params.ip}
+            </if>
+            <if test="params.port != null and params.port != ''">
+                and d.`port` = #{params.port}
+            </if>
+        </where>
+        group by d.ip
+        ) da
+        JOIN scan_result s on da.ip = s.ip
+        JOIN `dns_type` dt ON da.ip = dt.ip and dt.type > 0
+
+        GROUP BY dt.type
+    </select>
+
+    <select id="getDo53ProvinceCountByDnsType" resultType="java.util.Map">
+        select s.`province`,COUNT(distinct s.ip) count  from
+             (SELECT  s.ip,ii.province   FROM `scan_result` s
+                    JOIN `ip_information` ii  ON s.ip = ii.ip
+                    where ii.province IS NOT NULL AND ii.province !=''
+                        <if test="params.ip != null and params.ip != ''">
+                        AND s.ip = #{params.ip}
+                        </if>
+                 ) s
+            join dns_type dt on s.ip = dt.ip
+        where dt.type = #{dnsType}
+        GROUP BY s.province
+    </select>
+
+    <select id="getDo53ProviderCountByDnsType" resultType="java.util.Map">
+        SELECT
+        s.`provider`,COUNT(distinct s.ip) count
+        FROM (  SELECT ii.`provider`,s.ip
+        FROM `scan_result` s
+        JOIN `ip_information` ii
+        ON s.ip = ii.ip AND provider IS NOT NULL AND provider !=''
+        <where>
+            <if test="params.ip != null and params.ip != ''">
+                s.ip = #{params.ip}
+            </if>
+        </where>
+        ) s
+        JOIN dns_type dt on dt.ip = s.ip
+        <if test="dnsType != null and dnsType != ''">
+            AND dt.type = #{dnsType}
+        </if>
+        GROUP BY s.provider
+    </select>
+
+    <select id="getDo53ComponentCountByDnsType" resultType="java.util.Map">
+        select s.component,COUNT(distinct s.ip) count
+        from (
+            SELECT s.component, s.ip  FROM `scan_result` s
+        where
+        component IS NOT NULL AND component !=''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        ) s
+        JOIN (SELECT ip from dns_type where type = #{dnsType}) dt on s.ip = dt.ip
+        GROUP BY s.component
+    </select>
+
+    <select id="getDo53SrvCategoryCountByDnsType" resultType="java.lang.Integer">
+        SELECT COUNT(a1.ip) count FROM (
+        SELECT s.ip,dt.type FROM `scan_result` s
+        JOIN `dns_type` dt ON s.ip=dt.ip
+        where dt.type = #{dnsType}
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        ) a1
+        GROUP BY a1.type
+    </select>
+
+    <select id="getDo53VulnerabCountByDnsType" resultType="java.util.Map">
+        SELECT vulnerability,COUNT(a1.ip) count FROM (
+        SELECT s.ip
+        ,v.`vulnerability`
+        FROM `scan_result` s
+        JOIN `vulnerability` v ON v.`component` = s.`component`
+        where vulnerability IS NOT NULL AND vulnerability !=''
+        <if test="params.ip != null and params.ip != ''">
+            and s.ip = #{params.ip}
+        </if>
+        ) a1
+        JOIN dns_type dt on a1.ip = dt.ip and dt.type = #{dnsType}
+        GROUP BY a1.vulnerability
+    </select>
+
+
+</mapper>
